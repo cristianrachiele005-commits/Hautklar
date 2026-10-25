@@ -29,7 +29,7 @@ STUFEN_REIHENFOLGE = ["achtung", "top", "gut", "neutral", "unbekannt"]
 
 CSS = """
 <style>
-.block-container {max-width: 540px; padding-top: 1.5rem; padding-bottom: 3rem;}
+.block-container {max-width: 540px; padding-top: 4.5rem; padding-bottom: 3rem;}
 div.stButton > button {border-radius: 28px; min-height: 48px; font-weight: 700;}
 .hk-logo {display:flex; align-items:center; gap:10px; font-weight:800; font-size:20px; margin-bottom:12px; color:#1E1A24;}
 .hk-logo .b {width:34px; height:34px; border-radius:11px; background:#6B3FA0; display:inline-flex; align-items:center; justify-content:center;}
