@@ -4,8 +4,10 @@ Starten mit:  streamlit run app.py
 """
 
 from html import escape as e
+from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import logik as L
 
@@ -184,60 +186,110 @@ def seite_profil():
 
 # ---------------------------------------------------------------- Seite: Scannen
 
+SCANNER = components.declare_component("hautklar_scanner", path=str(Path(__file__).parent / "komponenten" / "scanner"))
+
+
+def api_schluessel():
+    try:
+        return st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def ki_lesen(bild_bytes, schluessel):
+    return L.lese_zutatenliste(bild_bytes, schluessel)
+
+
 def zeige_produkt(produkt):
     st.session_state.produkt = produkt
+    st.session_state.offener_barcode = None
+    st.session_state.offenes_produkt = None
     st.session_state.seite = "ergebnis"
     st.rerun()
+
+
+def neu_scannen():
+    st.session_state.offener_barcode = None
+    st.session_state.offenes_produkt = None
+    st.session_state.scan_runde = st.session_state.get("scan_runde", 0) + 1
 
 
 def lade_barcode(code):
     produkt = L.suche_lokal(code, PRODUKTE)
     if produkt is None:
-        with st.spinner("Suche in Open Beauty Facts"):
+        with st.spinner("Produkt wird gesucht"):
             produkt = L.suche_open_beauty_facts(code)
-    if produkt is None:
-        st.error("Dieses Produkt kennen wir noch nicht. Füge die Zutatenliste im Tab Zutatenliste ein.")
+    if produkt and produkt.get("inci"):
+        zeige_produkt(produkt)
+    # Unbekannt oder ohne Zutatenliste: Foto der Zutatenliste verlangen
+    st.session_state.offener_barcode = code
+    st.session_state.offenes_produkt = produkt
+
+
+def foto_bereich(key, barcode=None):
+    foto = st.file_uploader("Foto der Zutatenliste", type=["jpg", "jpeg", "png", "webp"], key=key)
+    if foto is None:
         return
-    zeige_produkt(produkt)
+    schluessel = api_schluessel()
+    if not schluessel:
+        st.error("Der API Schlüssel fehlt. Trage ANTHROPIC_API_KEY in Streamlit unter Settings bei Secrets ein.")
+        return
+    with st.spinner("Zutatenliste wird gelesen"):
+        ergebnis = ki_lesen(foto.getvalue(), schluessel)
+    if isinstance(ergebnis, str):
+        st.warning(ergebnis)
+        return
+    ergebnis = dict(ergebnis)
+    vorher = st.session_state.get("offenes_produkt") or {}
+    if barcode:
+        ergebnis["barcode"] = barcode
+    for feld_name in ("marke", "name", "ml", "bild"):
+        if vorher.get(feld_name) and (not ergebnis.get(feld_name) or ergebnis[feld_name] == "Gescanntes Produkt"):
+            ergebnis[feld_name] = vorher[feld_name]
+    zeige_produkt(ergebnis)
 
 
 def seite_scan():
     kopfzeile("Produkt scannen", "profil")
-    tab_foto, tab_code, tab_liste, tab_demo = st.tabs(["Foto", "Barcode", "Zutatenliste", "Demo"])
+    tab_scan, tab_foto, tab_mehr = st.tabs(["Barcode scannen", "Zutatenliste", "Weitere"])
+
+    with tab_scan:
+        offen = st.session_state.get("offener_barcode")
+        if not offen:
+            wert = SCANNER(key=f"scanner_{st.session_state.get('scan_runde', 0)}", default=None)
+            if wert and wert.get("zeit") != st.session_state.get("letzter_scan"):
+                st.session_state.letzter_scan = wert.get("zeit")
+                lade_barcode(str(wert.get("code", "")).strip())
+                offen = st.session_state.get("offener_barcode")
+        if offen:
+            st.info(f"Den Barcode {offen} kennen wir noch nicht. Fotografiere die Rückseite mit der Zutatenliste, dann prüfen wir das Produkt.")
+            foto_bereich(key=f"foto_nach_scan_{offen}", barcode=offen)
+            st.button("Nochmals scannen", use_container_width=True, on_click=neu_scannen)
 
     with tab_foto:
-        st.write("Mach ein Foto vom Barcode auf der Verpackung.")
-        foto = st.file_uploader("Foto vom Barcode", type=["jpg", "jpeg", "png", "webp"], label_visibility="collapsed")
-        with st.expander("Oder direkt mit der Kamera"):
-            kamera = st.camera_input("Kamera", label_visibility="collapsed")
-        bild = foto or kamera
-        if bild is not None:
-            with st.spinner("Barcode wird gelesen"):
-                code = L.lese_barcode(bild.getvalue())
-            if code:
-                st.success(f"Barcode erkannt: {code}")
-                lade_barcode(code)
-            else:
-                st.warning("Kein Barcode erkannt. Halte die Kamera näher und gerade, oder tippe die Nummer ein.")
+        st.write("Fotografiere die Rückseite mit der Liste der Inhaltsstoffe. Das klappt mit jedem Produkt.")
+        foto_bereich(key="foto_direkt")
 
-    with tab_code:
-        code = st.text_input("Barcode Nummer", placeholder="z.B. 7610000000011")
-        if st.button("Suchen", type="primary", use_container_width=True, key="suchen"):
+    with tab_mehr:
+        st.markdown("**Barcode eintippen**")
+        code = st.text_input("Barcode Nummer", placeholder="z.B. 7610000000011", label_visibility="collapsed")
+        if st.button("Suchen", use_container_width=True, key="suchen"):
             code = "".join(c for c in code if c.isdigit())
             if code:
                 lade_barcode(code)
+                st.info("Den Barcode kennen wir noch nicht. Fotografiere die Zutatenliste im Tab Barcode scannen.")
             else:
                 st.warning("Bitte eine Nummer eingeben.")
 
-    with tab_liste:
-        st.write("Kopiere die Zutatenliste (INCI) von der Verpackung oder aus dem Onlineshop.")
+        st.markdown("**Zutatenliste einfügen**")
         name = st.text_input("Produktname", placeholder="z.B. Mein Serum")
-        text = st.text_area("Zutatenliste", placeholder="Aqua, Glycerin, Niacinamide, Parfum, ...", height=120)
+        text = st.text_area("Zutatenliste", placeholder="Aqua, Glycerin, Niacinamide, Parfum, ...", height=110)
         c1, c2 = st.columns(2)
         preis = c1.number_input("Preis in CHF", min_value=0.0, step=0.5, value=0.0)
         ml = c2.number_input("Menge in ml", min_value=0.0, step=5.0, value=0.0)
         kategorie = st.selectbox("Kategorie", L.KATEGORIEN)
-        if st.button("Prüfen", type="primary", use_container_width=True, key="pruefen"):
+        if st.button("Prüfen", use_container_width=True, key="pruefen"):
             inci = L.zutaten_aus_text(text)
             if not inci:
                 st.warning("Bitte eine Zutatenliste einfügen.")
@@ -246,11 +298,10 @@ def seite_scan():
                                "kategorie": kategorie, "ml": ml or None, "preis": preis or None,
                                "inci": inci, "quelle": "Eigene Eingabe"})
 
-    with tab_demo:
-        st.write("Probiere die App mit Beispielprodukten aus.")
-        wahl = st.selectbox("Beispielprodukt", PRODUKTE,
+        st.markdown("**Demo Produkte**")
+        wahl = st.selectbox("Beispielprodukt", PRODUKTE, label_visibility="collapsed",
                             format_func=lambda p: f"{p['marke']} {p['name']} ({L.chf(p['preis'])})")
-        if st.button("Dieses Produkt prüfen", type="primary", use_container_width=True, key="demo"):
+        if st.button("Dieses Produkt prüfen", use_container_width=True, key="demo"):
             zeige_produkt(dict(wahl, quelle="Hautklar Datenbank"))
 
 

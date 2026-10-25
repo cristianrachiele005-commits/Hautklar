@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; font-family: system-ui, -apple-system, sans-serif; }
+  #rahmen { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #1E1A24; border-radius: 20px; overflow: hidden; }
+  #leser { width: 100%; height: 100%; }
+  #leser video { width: 100% !important; height: 100% !important; object-fit: cover; }
+  #leser img, #leser__dashboard, #leser__header_message { display: none !important; }
+  #fenster { position: absolute; left: 10%; right: 10%; top: 28%; bottom: 28%; border: 3px solid #FFFFFF; border-radius: 16px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.35); pointer-events: none; }
+  #linie { position: absolute; left: 6%; right: 6%; top: 50%; height: 2px; background: #C9A8F0; animation: wandern 1.6s ease-in-out infinite alternate; }
+  @keyframes wandern { from { top: 15%; } to { top: 85%; } }
+  #status { margin: 10px 2px 0; font-size: 15px; color: #3B3544; text-align: center; min-height: 22px; }
+  #start { display: none; position: absolute; inset: 0; margin: auto; width: 220px; height: 52px; border: none; border-radius: 26px; background: #6B3FA0; color: #FFFFFF; font-size: 16px; font-weight: 700; cursor: pointer; }
+  #rahmen.erkannt #fenster { border-color: #3CC47C; }
+  #rahmen.erkannt #linie { display: none; }
+</style>
+</head>
+<body>
+<div id="rahmen">
+  <div id="leser"></div>
+  <div id="fenster"><div id="linie"></div></div>
+  <button id="start" type="button">Kamera starten</button>
+</div>
+<div id="status">Kamera wird gestartet …</div>
+
+<script>
+  // Kommunikation mit Streamlit (ohne Build Schritt)
+  function senden(typ, daten) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: typ }, daten), "*");
+  }
+  function hoeheMelden() {
+    senden("streamlit:setFrameHeight", { height: document.body.scrollHeight + 8 });
+  }
+  senden("streamlit:componentReady", { apiVersion: 1 });
+  window.addEventListener("load", hoeheMelden);
+  window.addEventListener("resize", hoeheMelden);
+  window.addEventListener("message", function (e) {
+    if (e.data && e.data.type === "streamlit:render") hoeheMelden();
+  });
+
+  const status = document.getElementById("status");
+  const rahmen = document.getElementById("rahmen");
+  const startKnopf = document.getElementById("start");
+  let scanner = null;
+  let fertig = false;
+
+  function erkannt(code) {
+    if (fertig) return;
+    fertig = true;
+    rahmen.classList.add("erkannt");
+    status.textContent = "Erkannt: " + code;
+    if (navigator.vibrate) navigator.vibrate(80);
+    senden("streamlit:setComponentValue", { value: { code: code, zeit: Date.now() }, dataType: "json" });
+    scanner.stop().catch(function () {});
+  }
+
+  function starten() {
+    startKnopf.style.display = "none";
+    status.textContent = "Halte den Barcode in den Rahmen";
+    const F = Html5QrcodeSupportedFormats;
+    if (!scanner) {
+      scanner = new Html5Qrcode("leser", {
+        formatsToSupport: [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.QR_CODE],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+    }
+    scanner.start(
+      { facingMode: "environment" },
+      { fps: 12, disableFlip: true },
+      erkannt,
+      function () {}
+    ).then(hoeheMelden).catch(function () {
+      status.textContent = "Kamera nicht erlaubt. Tippe auf Kamera starten und erlaube den Zugriff.";
+      startKnopf.style.display = "block";
+      hoeheMelden();
+    });
+  }
+
+  startKnopf.addEventListener("click", starten);
+  if (typeof Html5Qrcode === "undefined") {
+    status.textContent = "Scanner konnte nicht geladen werden. Prüfe die Internetverbindung.";
+  } else {
+    starten();
+  }
+</script>
+</body>
+</html>

@@ -312,6 +312,79 @@ def suche_open_beauty_facts(barcode):
     }
 
 
+# ---------------------------------------------------------------- Zutatenliste per Foto (KI)
+
+KI_MODELL = "claude-haiku-5-5"
+
+KI_AUFTRAG = """Auf dem Foto ist die Verpackung eines Pflegeprodukts.
+Lies die Liste der Inhaltsstoffe (INCI, oft nach "Ingredients" oder "Inhaltsstoffe") genau ab.
+Antworte NUR mit JSON in dieser Form:
+{"gefunden": true, "marke": "", "name": "", "menge_ml": null, "kategorie": "", "inci": ["Aqua", "Glycerin"]}
+Regeln:
+- inci: jeden Inhaltsstoff einzeln, in der Reihenfolge auf der Packung, Schreibweise wie gedruckt.
+- kategorie: eine von Serum, Feuchtigkeitscreme, Pickel und Unreinheiten, Reinigung, Sonnenschutz, Andere.
+- Marke, Name oder Menge nur angeben, wenn sie auf dem Foto lesbar sind, sonst leer lassen oder null.
+- Ist keine Zutatenliste lesbar: {"gefunden": false, "inci": []}"""
+
+
+def bild_verkleinern(bild_bytes, max_kante=1568):
+    """Macht Handyfotos kleiner, damit sie schneller und günstiger gelesen werden."""
+    import io
+    from PIL import Image, ImageOps
+    bild = ImageOps.exif_transpose(Image.open(io.BytesIO(bild_bytes))).convert("RGB")
+    bild.thumbnail((max_kante, max_kante))
+    puffer = io.BytesIO()
+    bild.save(puffer, format="JPEG", quality=85)
+    return puffer.getvalue()
+
+
+def lese_zutatenliste(bild_bytes, api_key):
+    """Liest die Inhaltsstoffe aus einem Foto. Gibt ein Produkt (dict) oder einen Fehlertext zurück."""
+    import base64
+    try:
+        import anthropic
+    except ImportError:
+        return "Das Paket anthropic fehlt in requirements.txt."
+    try:
+        daten = base64.standard_b64encode(bild_verkleinern(bild_bytes)).decode()
+    except Exception:
+        return "Das Foto konnte nicht geöffnet werden. Bitte als JPG oder PNG versuchen."
+    try:
+        antwort = anthropic.Anthropic(api_key=api_key).messages.create(
+            model=KI_MODELL,
+            max_tokens=1500,
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": daten}},
+                {"type": "text", "text": KI_AUFTRAG},
+            ]}],
+        )
+        text = "".join(b.text for b in antwort.content if getattr(b, "type", "") == "text")
+    except Exception as fehler:
+        return f"Die KI konnte das Foto nicht lesen ({type(fehler).__name__})."
+    treffer = re.search(r"\{.*\}", text, re.S)
+    if not treffer:
+        return "Die Zutatenliste war nicht lesbar. Versuche ein schärferes Foto."
+    try:
+        ergebnis = json.loads(treffer.group(0))
+    except json.JSONDecodeError:
+        return "Die Zutatenliste war nicht lesbar. Versuche ein schärferes Foto."
+    inci = [str(z).strip() for z in ergebnis.get("inci", []) if str(z).strip()]
+    if not ergebnis.get("gefunden") or not inci:
+        return "Auf dem Foto haben wir keine Zutatenliste gefunden. Fotografiere die Rückseite mit der Liste."
+    kategorie = ergebnis.get("kategorie")
+    menge = ergebnis.get("menge_ml")
+    return {
+        "barcode": None,
+        "marke": ergebnis.get("marke") or "",
+        "name": ergebnis.get("name") or "Gescanntes Produkt",
+        "kategorie": kategorie if kategorie in KATEGORIEN else None,
+        "ml": float(menge) if isinstance(menge, (int, float)) and menge > 0 else None,
+        "preis": None,
+        "inci": inci,
+        "quelle": "Foto der Zutatenliste",
+    }
+
+
 # ---------------------------------------------------------------- Barcode lesen
 
 def _texte(wert):

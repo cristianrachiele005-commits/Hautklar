@@ -13,7 +13,7 @@ streamlit run app.py
 
 1. **5 Fragen** zum Hauttyp (trocken, fettig, empfindlich, Pickel, Ziel, Budget)
 2. **Hautprofil** mit den Punkten, auf die die App achtet
-3. **Scannen**: Foto vom Barcode, Barcode eintippen, Zutatenliste einfügen oder Demo Produkt
+3. **Scannen**: Live Scanner für den Barcode, Foto der Zutatenliste (liest eine KI), Barcode eintippen oder Demo Produkt
 4. **Ergebnis** mit zwei Feldern:
    * **Preis Leistung**: sucht Produkte mit den gleichen Wirkstoffen, die günstiger sind
    * **Geeignet für dich**: warnt vor Stoffen, die für deinen Hauttyp schlecht sind
@@ -33,6 +33,14 @@ streamlit run app.py
 * Preise kommen im Moment nur aus `produkte.json`. Für echte Vergleiche braucht es eine Preisquelle (Shops, Partner oder Eingaben der Nutzerinnen).
 * Die Regeln in `inhaltsstoffe.json` sind ein Startpunkt und sollten von einer Fachperson geprüft werden.
 
-## Barcode Erkennung
+## Barcode Scanner
 
-Läuft mit OpenCV (`opencv-python-headless` ab Version 4.8). Auf dem Handy am besten den Tab **Foto** nehmen, dann öffnet sich die Rückkamera.
+Der Scanner läuft im Browser (Ordner `komponenten/scanner`, Bibliothek html5-qrcode) und erkennt den Barcode direkt, ohne Foto.
+
+## KI für die Zutatenliste
+
+Für das Lesen der Zutatenliste braucht es einen API Schlüssel von Anthropic. In Streamlit Cloud unter **Settings, Secrets** eintragen:
+
+```toml
+ANTHROPIC_API_KEY = "sk-ant-..."
+```
