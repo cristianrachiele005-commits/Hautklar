@@ -200,9 +200,12 @@ SCANNER = components.declare_component("hautklar_scanner", path=str(Path(__file_
 
 def api_schluessel():
     try:
-        return st.secrets["ANTHROPIC_API_KEY"]
+        schluessel = str(st.secrets["ANTHROPIC_API_KEY"])
     except Exception:
         return None
+    # Leerzeichen, Zeilenumbrüche und Anführungszeichen vom Handy entfernen
+    schluessel = schluessel.strip().strip('"“”„\'‘’').strip()
+    return schluessel or None
 
 
 @st.cache_data(show_spinner=False)
