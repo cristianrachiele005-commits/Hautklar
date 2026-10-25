@@ -6,61 +6,100 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
   html, body { margin: 0; padding: 0; background: transparent; font-family: system-ui, -apple-system, sans-serif; }
-  #rahmen { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #1E1A24; border-radius: 20px; overflow: hidden; }
-  #leser { width: 100%; height: 100%; }
+  #rahmen { position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: 70vh; background: #1E1A24; border-radius: 22px; overflow: hidden; }
+  #leser { position: absolute; inset: 0; }
   #leser video { width: 100% !important; height: 100% !important; object-fit: cover; }
-  #leser img, #leser__dashboard, #leser__header_message { display: none !important; }
-  #fenster { position: absolute; left: 10%; right: 10%; top: 28%; bottom: 28%; border: 3px solid #FFFFFF; border-radius: 16px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.35); pointer-events: none; }
-  #linie { position: absolute; left: 6%; right: 6%; top: 50%; height: 2px; background: #C9A8F0; animation: wandern 1.6s ease-in-out infinite alternate; }
-  @keyframes wandern { from { top: 15%; } to { top: 85%; } }
-  #status { margin: 10px 2px 0; font-size: 15px; color: #3B3544; text-align: center; min-height: 22px; }
-  #start { display: none; position: absolute; inset: 0; margin: auto; width: 220px; height: 52px; border: none; border-radius: 26px; background: #6B3FA0; color: #FFFFFF; font-size: 16px; font-weight: 700; cursor: pointer; }
-  #rahmen.erkannt #fenster { border-color: #3CC47C; }
-  #rahmen.erkannt #linie { display: none; }
+  #leser img, #leser__dashboard, #leser__header_message, #qr-shaded-region { display: none !important; }
+  #fenster { position: absolute; left: 9%; right: 9%; top: 34%; height: 26%; border: 3px solid #FFFFFF; border-radius: 16px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.30); pointer-events: none; transition: all .25s; }
+  #linie { position: absolute; left: 6%; right: 6%; height: 2px; background: #C9A8F0; animation: wandern 1.4s ease-in-out infinite alternate; }
+  @keyframes wandern { from { top: 12%; } to { top: 88%; } }
+  .foto #fenster { top: 10%; height: 66%; left: 7%; right: 7%; border-style: dashed; }
+  .foto #linie { display: none; }
+  #meldung { position: absolute; left: 12px; right: 12px; top: 12px; padding: 10px 14px; border-radius: 14px; background: rgba(30,26,36,0.82); color: #FFFFFF; font-size: 15px; font-weight: 600; line-height: 1.35; text-align: center; }
+  #meldung.fehler { background: rgba(161,42,31,0.92); }
+  #ausloeser { display: none; position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: 76px; height: 76px; border-radius: 38px; border: 5px solid #FFFFFF; background: #6B3FA0; cursor: pointer; padding: 0; }
+  #ausloeser:disabled { opacity: .5; }
+  .foto #ausloeser { display: block; }
+  #start { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 220px; height: 54px; border: none; border-radius: 27px; background: #6B3FA0; color: #FFFFFF; font-size: 16px; font-weight: 700; cursor: pointer; }
+  #wechsel { display: block; width: 100%; margin-top: 10px; height: 48px; border: 1.5px solid #E4E1EA; border-radius: 24px; background: #FFFFFF; color: #6B3FA0; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .foto + #wechsel { display: none; }
+  #blitz { position: absolute; inset: 0; background: #FFFFFF; opacity: 0; pointer-events: none; transition: opacity .2s; }
 </style>
 </head>
 <body>
 <div id="rahmen">
   <div id="leser"></div>
   <div id="fenster"><div id="linie"></div></div>
+  <div id="meldung">Kamera wird gestartet …</div>
+  <button id="ausloeser" type="button" aria-label="Foto aufnehmen"></button>
   <button id="start" type="button">Kamera starten</button>
+  <div id="blitz"></div>
 </div>
-<div id="status">Kamera wird gestartet …</div>
+<button id="wechsel" type="button">Kein Barcode? Zutatenliste fotografieren</button>
 
 <script>
-  // Kommunikation mit Streamlit (ohne Build Schritt)
+  // ---------- Verbindung zu Streamlit (ohne Build Schritt)
   function senden(typ, daten) {
     window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: typ }, daten), "*");
   }
-  function hoeheMelden() {
-    senden("streamlit:setFrameHeight", { height: document.body.scrollHeight + 8 });
-  }
-  senden("streamlit:componentReady", { apiVersion: 1 });
-  window.addEventListener("load", hoeheMelden);
-  window.addEventListener("resize", hoeheMelden);
-  window.addEventListener("message", function (e) {
-    if (e.data && e.data.type === "streamlit:render") hoeheMelden();
-  });
+  function hoeheMelden() { senden("streamlit:setFrameHeight", { height: document.body.scrollHeight + 6 }); }
+  function wertSenden(wert) { senden("streamlit:setComponentValue", { value: Object.assign({ zeit: Date.now() }, wert), dataType: "json" }); }
 
-  const status = document.getElementById("status");
   const rahmen = document.getElementById("rahmen");
+  const meldung = document.getElementById("meldung");
+  const ausloeser = document.getElementById("ausloeser");
   const startKnopf = document.getElementById("start");
-  let scanner = null;
-  let fertig = false;
+  const wechsel = document.getElementById("wechsel");
+  const blitz = document.getElementById("blitz");
 
-  function erkannt(code) {
-    if (fertig) return;
-    fertig = true;
-    rahmen.classList.add("erkannt");
-    status.textContent = "Erkannt: " + code;
-    if (navigator.vibrate) navigator.vibrate(80);
-    senden("streamlit:setComponentValue", { value: { code: code, zeit: Date.now() }, dataType: "json" });
-    scanner.stop().catch(function () {});
+  let scanner = null;
+  let modus = "scan";      // scan oder foto
+  let laeuft = false;
+  let letzteArgs = "";
+
+  function zeige(text, fehler) {
+    meldung.textContent = text;
+    meldung.classList.toggle("fehler", !!fehler);
   }
 
+  // ---------- Barcode erkannt
+  function erkannt(code) {
+    if (modus !== "scan") return;
+    modus = "warten";
+    try { scanner.pause(false); } catch (e) {}
+    if (navigator.vibrate) navigator.vibrate(80);
+    zeige("Erkannt: " + code + ". Produkt wird gesucht …");
+    wertSenden({ code: code });
+  }
+
+  // ---------- Fotomodus: Kamera bleibt offen, ein Tipp macht das Foto
+  function fotoModus(text) {
+    modus = "foto";
+    try { scanner.pause(false); } catch (e) {}
+    rahmen.classList.add("foto");
+    ausloeser.disabled = false;
+    zeige(text || "Halte die Zutatenliste in den Rahmen und tippe auf den Knopf.");
+    hoeheMelden();
+  }
+
+  function fotoMachen() {
+    const video = document.querySelector("#leser video");
+    if (!video || !video.videoWidth) { zeige("Kamera ist noch nicht bereit.", true); return; }
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    const bild = canvas.toDataURL("image/jpeg", 0.9);
+    blitz.style.opacity = "0.8";
+    setTimeout(function () { blitz.style.opacity = "0"; }, 150);
+    ausloeser.disabled = true;
+    zeige("Zutatenliste wird gelesen …");
+    wertSenden({ foto: bild });
+  }
+
+  // ---------- Kamera starten
   function starten() {
     startKnopf.style.display = "none";
-    status.textContent = "Halte den Barcode in den Rahmen";
     const F = Html5QrcodeSupportedFormats;
     if (!scanner) {
       scanner = new Html5Qrcode("leser", {
@@ -71,19 +110,53 @@
     }
     scanner.start(
       { facingMode: "environment" },
-      { fps: 12, disableFlip: true },
+      {
+        fps: 12,
+        disableFlip: true,
+        videoConstraints: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
+      },
       erkannt,
       function () {}
-    ).then(hoeheMelden).catch(function () {
-      status.textContent = "Kamera nicht erlaubt. Tippe auf Kamera starten und erlaube den Zugriff.";
+    ).then(function () {
+      laeuft = true;
+      if (modus === "foto") fotoModus(meldung.textContent);
+      else zeige("Halte den Barcode in den Rahmen");
+      hoeheMelden();
+    }).catch(function () {
+      zeige("Bitte den Kamerazugriff erlauben.", true);
       startKnopf.style.display = "block";
       hoeheMelden();
     });
   }
 
+  // ---------- Befehle von Streamlit (Python)
+  window.addEventListener("message", function (e) {
+    if (!e.data || e.data.type !== "streamlit:render") return;
+    const args = e.data.args || {};
+    const schluessel = JSON.stringify(args);
+    if (schluessel === letzteArgs) return;
+    letzteArgs = schluessel;
+    if (args.modus === "foto") {
+      fotoModus(args.fehler || args.hinweis);
+      if (args.fehler) meldung.classList.add("fehler");
+    } else if (args.modus === "scan" && modus === "warten") {
+      modus = "scan";
+      try { scanner.resume(); } catch (err) {}
+      zeige(args.fehler || "Halte den Barcode in den Rahmen", !!args.fehler);
+    }
+    hoeheMelden();
+  });
+
+  ausloeser.addEventListener("click", fotoMachen);
   startKnopf.addEventListener("click", starten);
+  wechsel.addEventListener("click", function () { fotoModus(); });
+
+  senden("streamlit:componentReady", { apiVersion: 1 });
+  window.addEventListener("load", hoeheMelden);
+  window.addEventListener("resize", hoeheMelden);
+
   if (typeof Html5Qrcode === "undefined") {
-    status.textContent = "Scanner konnte nicht geladen werden. Prüfe die Internetverbindung.";
+    zeige("Scanner konnte nicht geladen werden. Prüfe die Internetverbindung.", true);
   } else {
     starten();
   }
