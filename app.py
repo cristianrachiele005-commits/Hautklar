@@ -113,16 +113,26 @@ def seite_start():
         '<div class="hk-h1">Scannen. Verstehen. Sparen.</div>'
         '<p class="hk-lead">Scanne dein Pflegeprodukt und sieh sofort, was drin ist, '
         'ob es zu deiner Haut passt und ob es das Gleiche günstiger gibt.</p>'
-        '<div style="margin-bottom:18px">'
-        f'<span class="hk-pill" style="background:{FARBEN["gruen"]["bg"]};color:{FARBEN["gruen"]["fg"]};margin-right:8px">Passt zu dir</span>'
-        f'<span class="hk-pill" style="background:{FARBEN["orange"]["bg"]};color:{FARBEN["orange"]["fg"]}">Gibt es günstiger</span>'
-        '</div>'
     )
-    st.button("Hauttyp bestimmen", type="primary", use_container_width=True,
-              on_click=gehe, args=("fragen",), kwargs={"schritt": 0})
-    if profil():
-        st.button("Direkt scannen", use_container_width=True, on_click=gehe, args=("scan",))
-    st.caption("5 kurze Fragen, dauert 1 Minute")
+    pr = profil()
+    if pr:
+        chips = "".join(f'<span class="hk-chip">{e(c)}</span>' for c in (pr["empfindlich"], "Ziel: " + pr["ziel"]))
+        html(
+            '<div class="hk-card"><div class="hk-label" style="color:#6B3FA0">Dein Hauttyp</div>'
+            f'<div class="hk-titel" style="font-size:22px;margin:4px 0 10px">{e(pr["hauttyp"])}</div>{chips}</div>'
+        )
+        st.button("Produkt scannen", type="primary", use_container_width=True, on_click=gehe, args=("scan",))
+        st.button("Hauttyp ändern", use_container_width=True, on_click=gehe, args=("fragen",), kwargs={"schritt": 0})
+    else:
+        html(
+            '<div style="margin-bottom:18px">'
+            f'<span class="hk-pill" style="background:{FARBEN["gruen"]["bg"]};color:{FARBEN["gruen"]["fg"]};margin-right:8px">Passt zu dir</span>'
+            f'<span class="hk-pill" style="background:{FARBEN["orange"]["bg"]};color:{FARBEN["orange"]["fg"]}">Gibt es günstiger</span>'
+            '</div>'
+        )
+        st.button("Hauttyp bestimmen", type="primary", use_container_width=True,
+                  on_click=gehe, args=("fragen",), kwargs={"schritt": 0})
+        st.caption("5 kurze Fragen, dauert 1 Minute. Danach merkt sich die App deinen Hauttyp.")
 
 
 # ---------------------------------------------------------------- Seite: Fragen
@@ -180,8 +190,7 @@ def seite_profil():
         f'<div class="hk-card"><div class="hk-titel">Darauf achten wir bei dir</div>{regeln}</div>'
     )
     st.button("Produkt scannen", type="primary", use_container_width=True, on_click=gehe, args=("scan",))
-    st.button("Fragen nochmals beantworten", use_container_width=True, on_click=gehe, args=("fragen",),
-              kwargs={"schritt": 0, "antworten": [None] * 5})
+    st.button("Hauttyp ändern", use_container_width=True, on_click=gehe, args=("fragen",), kwargs={"schritt": 0})
 
 
 # ---------------------------------------------------------------- Seite: Scannen
@@ -430,3 +439,20 @@ SEITEN = {
     "ergebnis": seite_ergebnis,
 }
 SEITEN[st.session_state.seite]()
+
+# Hauttyp auf dem Handy speichern und beim nächsten Besuch wieder laden
+SPEICHER = components.declare_component("hautklar_speicher", path=str(Path(__file__).parent / "komponenten" / "speicher"))
+
+
+def gueltige_antworten(wert):
+    return (isinstance(wert, list) and len(wert) == len(L.FRAGEN)
+            and all(isinstance(x, int) and 0 <= x < len(L.FRAGEN[i]["optionen"]) for i, x in enumerate(wert)))
+
+
+_antworten = st.session_state.antworten
+_gespeichert = SPEICHER(wert=list(_antworten) if None not in _antworten else None, key="speicher", default=None)
+if not st.session_state.get("profil_geladen") and gueltige_antworten(_gespeichert):
+    st.session_state.profil_geladen = True
+    if None in _antworten:
+        st.session_state.antworten = list(_gespeichert)
+        st.rerun()

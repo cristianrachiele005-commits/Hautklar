@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+</head>
+<body style="margin:0">
+<script>
+  // Speichert die Antworten zum Hauttyp im Browser (localStorage), damit sie beim nächsten Besuch noch da sind.
+  const SCHLUESSEL = "hautklar_antworten";
+  let zuletzt;
+
+  function senden(typ, daten) {
+    window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: typ }, daten), "*");
+  }
+
+  window.addEventListener("message", function (e) {
+    if (!e.data || e.data.type !== "streamlit:render") return;
+    const args = e.data.args || {};
+    let gespeichert = null;
+    try {
+      if (args.loeschen) localStorage.removeItem(SCHLUESSEL);
+      if (args.wert) localStorage.setItem(SCHLUESSEL, JSON.stringify(args.wert));
+      gespeichert = localStorage.getItem(SCHLUESSEL);
+    } catch (fehler) {
+      gespeichert = null;
+    }
+    if (gespeichert !== zuletzt) {
+      zuletzt = gespeichert;
+      senden("streamlit:setComponentValue", { value: gespeichert ? JSON.parse(gespeichert) : null, dataType: "json" });
+    }
+  });
+
+  senden("streamlit:componentReady", { apiVersion: 1 });
+  senden("streamlit:setFrameHeight", { height: 0 });
+</script>
+</body>
+</html>
